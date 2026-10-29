@@ -13,11 +13,18 @@ flowchart LR
     G --> CA[shopping-cart]
     G --> P[product]
     G --> PR[promotion]
-    O -. POST interno .-> S[support]
+    O -- order.created --> R{{RabbitMQ<br/>ganjj.orders}}
+    O -- order.confirmed --> R
+    R --> S[support]
+    R --> PR
     P --> AI[llm-provider<br/>embedding-reranking<br/>vector-db]
 ```
 
-O `api-gateway` é a entrada única: valida o JWT (RS256) na borda, aplica rate limit e repassa `X-Correlation-ID`. O `support` não passa pelo gateway: o `order` o chama por HTTP interno ao criar um pedido.
+O `api-gateway` é a entrada única: valida o JWT (RS256) na borda, aplica rate limit e repassa `X-Correlation-ID`. O `support` não passa pelo gateway: o `order` publica `order.created` no exchange `ganjj.orders` do RabbitMQ e o `support` consome, enviando a notificação. Ao confirmar um pedido, o `order` publica `order.confirmed` e o `promotion` consome para contar o uso do cupom. A publicação sai de uma outbox, para não perder evento se o broker estiver fora.
+
+## Execução
+
+Tudo roda em Kubernetes (EKS, na AWS Academy). O Ingress NGINX expõe só o `api-gateway`; os demais serviços ficam atrás de Services internos e o gateway os encontra pelo DNS do cluster. O gateway e o `promotion` têm Helm chart, e o Prometheus e o Grafana saem do `api-gateway` (`k8s/observability`).
 
 ## Serviços
 
@@ -30,7 +37,7 @@ O `api-gateway` é a entrada única: valida o JWT (RS256) na borda, aplica rate 
 | [shopping-cart](https://github.com/Back-End-Cloud-Computing/shopping-cart) | Carrinho | Node + Express + Redis | João Pedro Cardoso de Liz |
 | [product](https://github.com/Back-End-Cloud-Computing/product) | Catálogo e busca | Python + FastAPI + MongoDB | João Vitor Correa Oliveira |
 | [promotion](https://github.com/Back-End-Cloud-Computing/promotion) | Promoções, cupons e campanhas | PHP + Laravel + MySQL | Lucas Stopinski da Silva |
-| [support](https://github.com/Back-End-Cloud-Computing/support) | Notificações por e-mail, SMS e WhatsApp | Go + SQLite (provisório) | Eduardo Henrique Fabri |
+| [support](https://github.com/Back-End-Cloud-Computing/support) | Notificações por e-mail, SMS e WhatsApp | Java + Spring Boot + SQLite | Eduardo Henrique Fabri |
 | [llm-provider](https://github.com/Back-End-Cloud-Computing/llm-provider) | Abstrai o acesso a um LLM externo (apoio ao `product`) | Python + FastAPI | João Vitor Correa Oliveira |
 | [embedding-reranking](https://github.com/Back-End-Cloud-Computing/embedding-reranking) | Embeddings e reranking (apoio ao `product`) | Python + FastAPI | João Vitor Correa Oliveira |
 | [vector-db](https://github.com/Back-End-Cloud-Computing/vector-db) | Gerencia o banco vetorial (apoio ao `product`) | Python + FastAPI | João Vitor Correa Oliveira |
